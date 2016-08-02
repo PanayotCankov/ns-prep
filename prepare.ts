@@ -1,6 +1,6 @@
 #! /usr/bin/env node
 
-import { existsSync, writeFileSync, readFileSync, readdirSync, lstatSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, writeFileSync, readFileSync, readdirSync, lstatSync, mkdirSync, unlinkSync, rmdirSync } from "fs";
 import { join, sep } from "path";
 import { red, yellow, green, gray, bold } from "chalk";
 import * as shelljs from "shelljs";
@@ -39,17 +39,17 @@ console.time("total");
 class Project {
     private static tns_modules = "tns_modules";
 
-    private root: Project.Package;
-    private flatten: Project.FlattenMap;
+    private app: Project.Package;
+    private packages: Project.FlattenMap;
 
     constructor() {
     }
 
     public buildSourceMap() {
-        this.root = {
+        this.app = {
             type: Project.PackageType.App,
             name: ".",
-            path: "./",
+            path: ".",
             packageJson: null,
             requiredVersion: "*",
             version: null,
@@ -60,17 +60,18 @@ class Project {
             directories: [],
             availability: Project.Availability.Available
         }
-        this.flatten = {};
+        this.packages = {};
 
-        this.selectDependencyPackages(this.root);
-        this.listPackageFiles(this.root);
+        this.selectDependencyPackages(this.app);
+        this.listPackageFiles(this.app);
+        this.listAppFiles();
     }
 
     public printSourceMap() {
-        if (!this.root) {
+        if (!this.app) {
             throw "Requires source map to be build first";
         }
-        this.printRecursive(this.root, "");
+        this.printRecursive(this.app, "");
     }
 
     public buildDelta(output: Project.Destination): Project.Delta.Build {
@@ -82,6 +83,10 @@ class Project {
             copy: {},
             mkdir: {}
         }
+
+        let appLength = ("app" + sep).length;
+        this.app.directories.filter(d => d != "app" + sep).forEach(dir => delta.mkdir[dir.substr(appLength)] = true);
+        this.app.files.forEach(file => delta.copy[file.substr(appLength)] = file);
 
         function copyAll(pack: Project.Package) {
             pack.files.forEach(file => {
@@ -113,8 +118,8 @@ class Project {
         }
 
         delta.mkdir[Project.tns_modules + sep] = true;
-        for (let key in this.flatten) {
-            let pack = this.flatten[key];
+        for (let key in this.packages) {
+            let pack = this.packages[key];
             copyAll(pack);
             mkdirAll(pack);
         }
@@ -184,7 +189,7 @@ class Project {
         console.timeEnd("  rm file");
 
         console.time("  rm dir");
-        Object.keys(delta.rmdir).sort().reverse().forEach(dir => unlinkSync(output.path + sep + dir));
+        Object.keys(delta.rmdir).sort().reverse().forEach(dir => rmdirSync(output.path + sep + dir));
         console.timeEnd("  rm dir");
     }
 
@@ -206,21 +211,21 @@ class Project {
         pack.version = pack.packageJson.version;
 
         if (pack.type === Project.PackageType.App) {
-        } else if (pack.name in this.flatten) {
+        } else if (pack.name in this.packages) {
             // Resolve conflicts
-            let other = this.flatten[pack.name];
+            let other = this.packages[pack.name];
             // Get the one with higher version...
             let packVersion = pack.packageJson.version;
             let otherVersion = other.packageJson.version;
             if (semver.gt(packVersion, otherVersion)) {
                 other.availability = Project.Availability.ShadowedByDiverged;
-                this.flatten[pack.name] = pack;
+                this.packages[pack.name] = pack;
             } else {
                 pack.availability = Project.Availability.ShadowedByDiverged;
             }
         } else {
             pack.availability = Project.Availability.Available;
-            this.flatten[pack.name] = pack;
+            this.packages[pack.name] = pack;
         }
 
         let resolved: { [key: string]: any; } = {};
@@ -253,14 +258,42 @@ class Project {
         }
     }
 
+    private listAppFiles() {
+        let appPath = "app";
+        let ignoreFiles = {
+            ["app" + sep + "App_Resources"]: true
+        };
+
+        if (existsSync(appPath)) {
+            this.app.directories.push("app/");
+            let listAppFiles = (path: string) => {
+                readdirSync(path).forEach(f => {
+                    let filePath = path + sep + f;
+                    if (filePath in ignoreFiles) {
+                        return;
+                    }
+                    let dirPath = filePath + sep;
+                    let lstat = lstatSync(filePath);
+                    if (lstat.isDirectory()) {
+                        this.app.directories.push(dirPath);
+                        listAppFiles(filePath);
+                    } else if (lstat.isFile()) {
+                        this.app.files.push(filePath);
+                    }
+                });
+            }
+            listAppFiles(appPath);
+        }
+    }
+
     private listPackageFiles(pack: Project.Package) {
         if (pack.type === Project.PackageType.Package && pack.availability === Project.Availability.Available) {
-            this.assignNestedPackageFiles(pack, pack.path, pack);
+            this.listNestedPackageFiles(pack, pack.path, pack);
         }
         pack.children.forEach(child => this.listPackageFiles(child));
     }
 
-    private assignNestedPackageFiles(pack: Project.Package, dirPath: string, fileScope: Project.Package) {
+    private listNestedPackageFiles(pack: Project.Package, dirPath: string, fileScope: Project.Package) {
         // TODO: Once per pack:
         let modulePackageJson = pack.path + sep + "package.json";
         let ignorePaths: { [key:string]: boolean } = {
@@ -296,17 +329,17 @@ class Project {
 
                     pack.children.push(nestedPackage);
 
-                    if (nestedPackage.name in this.flatten) {
-                        let other = this.flatten[pack.name];
+                    if (nestedPackage.name in this.packages) {
+                        let other = this.packages[pack.name];
                         pack.availability = Project.Availability.ShadowedByDiverged;
                     } else {
-                        this.flatten[nestedPackage.name] = nestedPackage;
+                        this.packages[nestedPackage.name] = nestedPackage;
                     }
-                    this.assignNestedPackageFiles(pack, path, nestedPackage);
+                    this.listNestedPackageFiles(pack, path, nestedPackage);
                 } else {
                     let relativePath = path.substr(scopePathLength);
                     fileScope.directories.push(relativePath);
-                    this.assignNestedPackageFiles(pack, path, fileScope);
+                    this.listNestedPackageFiles(pack, path, fileScope);
                 }
             } else if (stat.isFile()) {
                 let relativePath = path.substr(scopePathLength);

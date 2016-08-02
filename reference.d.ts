@@ -12,6 +12,7 @@ declare module "fs" {
     }
     function mkdirSync(path: string);
     function unlinkSync(path: string);
+    function rmdirSync(path: string);
 }
 declare module "path" {
     const sep: string;
