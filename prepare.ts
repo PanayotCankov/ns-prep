@@ -218,6 +218,7 @@ class Project {
             let packVersion = pack.packageJson.version;
             let otherVersion = other.packageJson.version;
             if (semver.gt(packVersion, otherVersion)) {
+                pack.availability = Project.Availability.Available;
                 other.availability = Project.Availability.ShadowedByDiverged;
                 this.packages[pack.name] = pack;
             } else {
