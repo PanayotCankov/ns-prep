@@ -2,9 +2,19 @@ declare module "fs" {
     function readdirSync(path: string): string[];
     function existsSync(path: string): boolean;
     function readFileSync(path: string): string;
+    function writeFileSync(path: string, content: any);
+    function readdirSync(path: string): string[];
+    function lstatSync(path: string): {
+        isDirectory(): boolean;
+        isFile(): boolean;
+        mtime: Date;
+        ctime: Date;
+    }
+    function mkdirSync(path: string);
+    function unlinkSync(path: string);
 }
 declare module "path" {
-    const separator: string;
+    const sep: string;
     function join(...paths:string[]): string;
 }
 declare module "chalk" {
@@ -19,4 +29,10 @@ declare module "semver" {
     function lt(first: string, second: string);
     function gt(first: string, second: string);
     function satisfies(version: string, querry: string);
+}
+declare module "shelljs" {
+    function cp(source: string, dest: string);
+    function cp(options: string, source: string, dest: string);
+    function cp(source: string[], dest: string);
+    function cp(options: string, source: string[], dest: string);
 }
