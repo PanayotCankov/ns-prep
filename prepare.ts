@@ -1,7 +1,7 @@
 #! /usr/bin/env node
 
 import { existsSync, writeFileSync, readFileSync, readdirSync, lstatSync, mkdirSync, unlinkSync, rmdirSync } from "fs";
-import { join, sep } from "path";
+import { join, sep, dirname } from "path";
 import { red, yellow, green, gray, bold } from "chalk";
 import * as shelljs from "shelljs";
 import * as semver from "semver";
@@ -11,30 +11,6 @@ var child_process = require("child_process")
 var fs = require("fs");
 
 console.time("total");
-
-// let platform = process.argv[2];
-// console.log("Platform: " + platform);
-
-// let platformSuffix = "." + platform + ".";
-// let platformFilters: string[] = platform === "ios" ? [".android."] : [".ios."];
-
-// let target = process.argv[3];
-// console.log("target: " + target);
-
-// let targetAppPath = join(target, "app");
-// console.log("app: " + targetAppPath);
-
-// let zipPath = join(target, "livezync.zip");
-
-// let tnsModulesPath = join(targetAppPath, "tns_modules");
-// console.log("tns_modules: " + tnsModulesPath);
-// console.log("");
-
-// // TODO: Let's try to get delta and update gracefully the output...
-// console.time("clean");
-// child_process.spawnSync("rm", ["-rf", tnsModulesPath]);
-// child_process.spawnSync("rm", ["-rf", zipPath]);
-// console.timeEnd("clean");
 
 class Project {
     private static tns_modules = "tns_modules";
@@ -459,18 +435,78 @@ let output = {
 let delta = project.rebuildDelta(output);
 console.timeEnd("rebuild delta ios");
 
-// console.log("todo:");
-// console.log("  mkdirs " + Object.keys(delta.mkdir).length + " dirs.");
-// console.log("  copy " + Object.keys(delta.copy).length + " files.");
-// console.log("  rmfiles " + Object.keys(delta.rmfile).length + " files.");
-// console.log("  rmdir " + Object.keys(delta.rmdir).length + " dirs.");
-
 console.time("apply delta");
 project.applyDelta(output, delta);
 console.timeEnd("apply delta");
 
+// Spawning pool:
+console.time("capture sync state");
+interface FilesState {
+    [file: string]: number /* mtime.getTime() */
+}
+function captureState(base: string, path: string, pool: FilesState) {
+    readdirSync(path).forEach(child => {
+        let childPath = path + sep + child;
+        let lstat = lstatSync(childPath);
+        if (lstat.isDirectory()) {
+            captureState(base, childPath, pool);
+        } else if (lstat.isFile()) {
+            let relativePath = childPath.substr(base.length + sep.length);
+            pool[relativePath] = lstat.mtime.getTime();
+        }
+    });
+}
+
+// TODO: Add device ID into the mix:
+let lifesyncDir = "platforms" + sep + "ios" + sep + "lifesync";
+let lifesyncApp = lifesyncDir + sep + "app";
+let stateFilePath = lifesyncDir + sep + "lifesync.json";
+let lifesyncZipPath = lifesyncDir + sep + "lifesync.zip";
+
+let next: FilesState = {};
+captureState(output.path, output.path, next);
+
+function ensureFileDir(path: string) {
+    let dir = dirname(path);
+    if (!existsSync(dir)) {
+        ensureFileDir(dir);
+        mkdirSync(dir);
+    }
+}
+ensureFileDir(stateFilePath);
+child_process.spawnSync("rm", ["-rf", lifesyncApp]);
+child_process.spawnSync("rm", ["-rf", lifesyncZipPath]);
+
+let prev: FilesState;
+if (existsSync(stateFilePath)) {
+    prev = JSON.parse(readFileSync(stateFilePath));
+} else {
+    prev = {};
+}
+
+for(let f in prev) {
+    if (!(f in next)) {
+        console.log("rm file: " + f + " this should be in a diff file...");
+    }
+}
+
+for(let f in next) {
+    let prevMTime = prev[f] || 0;
+    let nextMTime = next[f];
+    if (prevMTime < nextMTime) {
+        let filePath = lifesyncApp + sep + f;
+        ensureFileDir(filePath);
+        writeFileSync(filePath, readFileSync(output.path + sep + f));
+    }
+}
+
+writeFileSync(stateFilePath, JSON.stringify(next));
+
+console.timeEnd("capture sync state");
+
 console.time("zip");
-child_process.spawnSync("zip", ["-r", "-X", "lifesync.zip", "app"], { cwd: "platforms" + sep + "ios" + sep + "SampleAppNG2" });
+child_process.spawnSync("zip", ["-r", "-X", "lifesync.zip", "app"], { cwd: lifesyncDir });
+console.log("Sync zip at: " + lifesyncDir + sep + "lifesync.zip");
 console.timeEnd("zip");
 
 console.timeEnd("total");

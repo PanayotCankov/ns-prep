@@ -17,6 +17,7 @@ declare module "fs" {
 declare module "path" {
     const sep: string;
     function join(...paths:string[]): string;
+    function dirname(path: string): string;
 }
 declare module "chalk" {
     function bold(text: string): string;
