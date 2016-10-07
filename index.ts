@@ -4,7 +4,7 @@ import { red, yellow, green, gray, bold } from "chalk";
 import * as shelljs from "shelljs";
 import * as semver from "semver";
 
-declare var require;
+declare var require, process;
 var fs = require("fs");
 
 class Project {
@@ -83,10 +83,8 @@ class Project {
             if (semver.gt(packVersion, otherVersion)) {
                 pack.availability = Project.Availability.Available;
                 other.availability = Project.Availability.ShadowedByDiverged;
-                console.log("! " + pack.path + " shadowed by " + other.path);
                 this.packages[pack.name] = pack;
             } else {
-                console.log("! " + other.path + " shadowed by " + pack.path);
                 pack.availability = Project.Availability.ShadowedByDiverged;
             }
         } else {
