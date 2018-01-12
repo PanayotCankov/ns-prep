@@ -3,7 +3,7 @@
 import Project from "./index";
 declare var process;
 
-let project = new Project(process.cwd());
+let project = new Project();
 
 console.time("build source map");
 project.buildSourceMap();
